@@ -16,6 +16,9 @@ concurrency:
 
 jobs:
   progress:
+    # Pages must be enabled in repository settings before deployment is useful.
+    # Forks opt in after selecting GitHub Actions as their Pages source.
+    if: vars.PORTPS5_PAGES_ENABLED == 'true'
     runs-on: ubuntu-latest
     environment:
       name: github-pages

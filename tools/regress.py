@@ -5,7 +5,8 @@ Subcommands:
 
 * ``prepare``  converts a dump (relinker --windows, never --skip-sce-module,
   which crashes guest libc++ iostream code), copies the runtime libs and links
-  ``app0`` to the dump. The dump is only ever read through the link.
+  ``app0`` to the dump. Missing config files are installed without replacing
+  user edits. The directory link does not write-protect the original dump.
 * ``run``      launches the converted exe with the install dir as cwd, waits
   for the run, consumes the structured telemetry log (portps5.telemetry/1,
   written by the runtime, spec section 4.1) and writes ``portps5.results/1``.
@@ -18,11 +19,14 @@ holds metrics, hashes and pass/fail only. All work files stay outside the repo.
 """
 
 import argparse
+import base64
 import hashlib
 import json
 import math
 import os
+import re
 import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -35,6 +39,16 @@ RESULTS_SCHEMA = "portps5.results/1"
 TELEMETRY_SCHEMA = "portps5.telemetry/1"
 TELEMETRY_REL = Path("logs") / "telemetry.jsonl"
 RUNNER_REL = Path("logs") / "runner.json"
+# Minimum Windows runtime from core/libs/CMakeLists.txt; individual titles can
+# import additional PRX modules, so callers should supply the complete libs build.
+REQUIRED_RUNTIME_FILES = (
+    "libc.prx",
+    "libkernel.prx",
+    "libSceAgcDriver.prx",
+    "libgcc_s_seh-1.dll",
+    "libstdc++-6.dll",
+    "libwinpthread-1.dll",
+)
 
 
 class RegressError(Exception):
@@ -279,38 +293,194 @@ def write_results(res, out):
     out.write_text(json.dumps(res, indent=2, allow_nan=False) + "\n", encoding="utf-8")
 
 
+def is_path_link(path):
+    """Recognize symlinks and Windows junctions, including on Python 3.11."""
+    if path.is_symlink():
+        return True
+    try:
+        attributes = path.lstat()
+    except FileNotFoundError:
+        return False
+    # Path.is_junction is unavailable before Python 3.12. Reparse attributes
+    # also reject other redirected output paths rather than writing through them.
+    return bool(
+        getattr(attributes, "st_file_attributes", 0)
+        & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    )
+
+
+def validate_app0(install, dump):
+    """Accept only a missing app0 or an existing directory link to this exact dump."""
+    link = install / "app0"
+    linked = is_path_link(link)
+    if (link.exists() or linked) and (not linked or not link.is_dir() or link.resolve() != dump):
+        raise RegressError("install app0 must be a junction or symlink to the requested dump")
+
+
 def link_app0(install, dump):
-    """Link <install>/app0 to the dump (junction on Windows, symlink elsewhere), read-only use."""
-    link = Path(install) / "app0"
-    if link.exists() or link.is_symlink():
+    """Link app0 to the dump; the junction/symlink does not write-protect its target."""
+    install, dump = Path(install), Path(dump).resolve()
+    validate_app0(install, dump)
+    link = install / "app0"
+    if link.exists():
         return
     if os.name == "nt":
-        subprocess.run(
-            ["cmd", "/c", "mklink", "/J", str(link), str(dump)],
-            check=True,
-            stdout=subprocess.DEVNULL,
+        # cmd.exe expands %VARIABLES% even inside quotes. Use PowerShell string
+        # literals in an encoded command so valid path characters remain data.
+        install_literal = str(install.resolve()).replace("'", "''")
+        dump_literal = str(dump).replace("'", "''")
+        command = (
+            f"Set-Location -LiteralPath '{install_literal}' -ErrorAction Stop; "
+            "New-Item -ItemType Junction -Path 'app0' -Target "
+            f"([System.Management.Automation.WildcardPattern]::Escape('{dump_literal}')) "
+            "-ErrorAction Stop | Out-Null"
         )
+        encoded = base64.b64encode(command.encode("utf-16le")).decode("ascii")
+        try:
+            subprocess.run(
+                ["powershell.exe", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
+                cwd=install,
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except (OSError, subprocess.CalledProcessError) as exc:
+            raise RegressError(
+                "could not create app0 junction; check Windows PowerShell and permissions"
+            ) from exc
     else:
         link.symlink_to(Path(dump), target_is_directory=True)
 
 
-def prepare(args):
-    """Convert the dump and lay out the install dir (exe, libs, sce_module, app0, config)."""
-    install = Path(args.install)
+def validate_dump_metadata(dump):
+    """Check the runtime's param.json requirements without exposing metadata values."""
+    try:
+        metadata = json.loads((dump / "sce_sys" / "param.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise RegressError("dump requires readable JSON at sce_sys/param.json") from exc
+    title_id = metadata.get("titleId") if isinstance(metadata, dict) else None
+    if not isinstance(title_id, str) or not re.fullmatch(r"[A-Z0-9]+", title_id):
+        raise RegressError("param.json titleId must be a nonempty uppercase ASCII identifier")
+    # Match ParamJsonParser.cpp's selection order; arbitrary title ID prefixes
+    # and unselected language entries need no additional restrictions here.
+    localized = metadata.get("localizedParameters")
+    language = metadata.get("defaultLanguage", "")
+    if not isinstance(localized, dict) or not localized or not isinstance(language, str):
+        raise RegressError("param.json requires localizedParameters and a string defaultLanguage")
+    entry = localized.get(language) if language and language in localized else None
+    if not (language and language in localized):
+        entry = localized.get("en-US", next(iter(localized.values())))
+    title = entry.get("titleName") if isinstance(entry, dict) else None
+    if not isinstance(title, str) or not title:
+        raise RegressError("param.json selected language requires a nonempty titleName")
+
+
+def validate_plain_tree(path, *, output=False):
+    """Reject redirected/special tree entries before copying or overwriting outputs."""
+    if is_path_link(path):
+        raise RegressError("prepare cannot use links within config, libs or generated output trees")
+    if not path.exists():
+        return
+    if path.is_dir():
+        for child in path.iterdir():
+            validate_plain_tree(child, output=output)
+    elif not path.is_file() or (output and path.stat().st_nlink > 1):
+        # Writing an existing hard link would also overwrite its other name,
+        # potentially inside the dump or build source, even after resolve().
+        raise RegressError("prepare requires regular, unlinked output files")
+
+
+def validate_copy_layout(source, destination):
+    """Detect file/directory collisions before conversion has created any outputs."""
+    if destination.exists() and source.is_dir() != destination.is_dir():
+        raise RegressError("install contains a file/directory conflict with the supplied sources")
+    if source.is_dir():
+        for child in source.iterdir():
+            validate_copy_layout(child, destination / child.name)
+
+
+def prepare_paths(args):
+    """Resolve and preflight every input and output before prepare writes files.
+
+    --libs must contain REQUIRED_RUNTIME_FILES from the patched Windows build.
+    Config defaults to the repository config directory and must contain global.toml.
+    Source/output overlap and redirected output trees are rejected, including a
+    stale app0 junction, so an existing install cannot mutate the original dump.
+    """
+    install, dump = Path(args.install).resolve(), Path(args.dump).resolve()
+    libs, config = Path(args.libs).resolve(), Path(args.config).resolve()
     ensure_outside_repo(install)
-    dump = Path(args.dump)
-    elf = dump / "eboot.elf"
-    if not elf.is_file():
+    ensure_outside_repo(dump)
+    paths = (install, dump, libs, config)
+    for index, left in enumerate(paths):
+        for right in paths[index + 1 :]:
+            if left == right or left in right.parents or right in left.parents:
+                raise RegressError("install, dump, libs and config directories must not overlap")
+    if not (dump / "eboot.elf").is_file():
         raise RegressError("dump has no eboot.elf")
+    validate_dump_metadata(dump)
+    if not libs.is_dir():
+        raise RegressError("--libs must name the patched runtime library directory")
+    missing = [name for name in REQUIRED_RUNTIME_FILES if not (libs / name).is_file()]
+    if missing:
+        raise RegressError("runtime libraries missing: " + ", ".join(missing))
+    if not config.is_dir() or not (config / "global.toml").is_file():
+        raise RegressError("--config must name a directory containing global.toml")
+    relinker = Path(args.relinker)
+    if not relinker.is_file():
+        found = shutil.which(args.relinker)
+        if not found:
+            raise RegressError("--relinker must name an existing executable")
+        relinker = Path(found)
+    relinker = relinker.resolve()
+    if install == relinker or install in relinker.parents:
+        raise RegressError("--relinker must be outside the install directory")
+    if install.exists() and not install.is_dir():
+        raise RegressError("--install must name a directory")
+    validate_app0(install, dump)
+    for source in (libs, config):
+        validate_plain_tree(source)
+    for name in ("libs", "config", "sce_module", "game.exe"):
+        output = install / name
+        validate_plain_tree(output, output=True)
+        if output.exists() and output.is_dir() == (name == "game.exe"):
+            raise RegressError("install output has the wrong file/directory type")
+    validate_copy_layout(libs, install / "libs")
+    validate_copy_layout(config, install / "config")
+    return install, dump, libs, config, relinker
+
+
+def copy_missing_config(source, destination):
+    """Seed absent config files while preserving every existing user customization."""
+    destination.mkdir(parents=True, exist_ok=True)
+    for child in source.iterdir():
+        target = destination / child.name
+        if child.is_dir():
+            copy_missing_config(child, target)
+        elif not target.exists():
+            # Exclusive creation preserves a file created since preflight too.
+            try:
+                with child.open("rb") as src, target.open("xb") as dst:
+                    shutil.copyfileobj(src, dst)
+            except FileExistsError:
+                pass
+
+
+def prepare(args):
+    """Convert a validated dump, refresh runtime libs and seed only missing config files."""
+    install, dump, libs, config, relinker = prepare_paths(args)
     install.mkdir(parents=True, exist_ok=True)
     # Full conversion on purpose: --skip-sce-module makes titles crash in guest libc++.
-    subprocess.run(
-        [args.relinker, "--windows", str(elf), str(install / "game.exe")],
-        check=True,
-        stdout=subprocess.DEVNULL,
-    )
-    if args.libs:
-        shutil.copytree(args.libs, install / "libs", dirs_exist_ok=True)
+    command = [str(relinker), "--windows"]
+    if args.to_intel:
+        command.append("--to-intel")
+    command.extend((str(dump / "eboot.elf"), str(install / "game.exe")))
+    try:
+        subprocess.run(command, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except subprocess.CalledProcessError as exc:
+        raise RegressError(f"relinker conversion failed (exit code {exc.returncode})") from exc
+    shutil.copytree(libs, install / "libs", dirs_exist_ok=True)
+    copy_missing_config(config, install / "config")
     link_app0(install, dump)
 
 
@@ -417,7 +587,17 @@ def main(argv=None):
     p.add_argument("--dump", required=True)
     p.add_argument("--install", required=True)
     p.add_argument("--relinker", required=True)
-    p.add_argument("--libs", help="build/release/core/libs/libs")
+    p.add_argument(
+        "--libs", required=True, help="patched Windows runtime dir, including MinGW DLLs"
+    )
+    p.add_argument(
+        "--config",
+        default=str(ROOT / "config"),
+        help="config source with global.toml (default: repo config); existing files are preserved",
+    )
+    p.add_argument(
+        "--to-intel", action="store_true", help="lower AMD-only instructions for Intel CPUs"
+    )
     p = sub.add_parser("run")
     add_common(p)
     p.add_argument("--duration-s", type=float, required=True)

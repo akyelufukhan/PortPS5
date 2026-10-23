@@ -21,7 +21,7 @@ PRD F6 and the ROADMAP M1 item: per-game TOML drives the runtime, and the typed 
 ## Acceptance Criteria
 
 - [x] Startup calls Loader::Initialize with the param.json title ID and aborts with file:line on a config error
-- [ ] Conversion copies config/ to the install directory
+- [x] `tools/regress.py prepare` seeds missing config files and preserves existing files (portps5-prp1); direct relinker use remains manual
 - [ ] `debug.*` keys are consumed by the subsystems that used `APS5_*` switches upstream
 - [ ] Resolved config hash, workarounds_set and debug_keys_set are available to the results JSON writer
 - [ ] configuration.md M1 row and ROADMAP M1 config item ticked
@@ -33,3 +33,5 @@ display.present_mode and display.resolution_scale wiring (own bean), results JSO
 ## Summary of Changes
 
 Startup is wired by portps5-ftci. Conversion copying, remaining debug consumers and results JSON remain open.
+
+Fork update 2026-10-23: config startup was already implemented at the fork base. Preparation now seeds config via portps5-prp1; remaining debug consumers keep this bean open.
