@@ -312,9 +312,15 @@ def test_prepare_converts_fully_links_app0_and_never_copies_dump(tmp_path):
     dump = tmp_path / "dump dir [x]"
     dump.mkdir()
     (dump / "eboot.elf").write_text("elf")
+    (dump / "sce_sys").mkdir()
+    (dump / "sce_sys" / "param.json").write_text(json.dumps({
+        "titleId": "PPSA00000", "localizedParameters": {"en-US": {"titleName": "Synthetic"}}
+    }))  # fmt: skip
     libs = tmp_path / "libs"
     libs.mkdir()
     (libs / "a.prx").write_text("p")
+    for name in regress.REQUIRED_RUNTIME_FILES:
+        (libs / name).write_text("synthetic runtime fixture")
     rel = tmp_path / "relinker"
     rel.write_text(f"#!{sys.executable}\nimport sys\nassert '--skip-sce-module' not in sys.argv\n"
         "assert sys.argv[1]=='--windows'\nopen(sys.argv[3],'w').write('exe')\n")  # fmt: skip

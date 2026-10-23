@@ -6,6 +6,16 @@ Status as of 2026-10-01: M0 is done except the upstream-baseline check, a local-
 
 This roadmap is phased, with no calendar dates. Capacity is a solo maintainer plus AI agents, part-time. Each milestone has measurable exit criteria and unlocks gate titles in order of risk. A milestone starts only when the previous one's exit criteria pass; any exception is recorded in the status line above and never relaxes the exit criteria. Each milestone becomes its own `ooo seed`.
 
+## Development fork additions (2026-10-23)
+
+- [x] Read-only build doctor with text/JSON reports (`portps5-prp1`).
+- [x] Preparation config seeding without overwriting user settings, input/runtime checks and `--to-intel` forwarding (`portps5-prp1`).
+- [x] CMake minimum aligned to schema v6 (`portps5-vtlf`).
+- [x] Python quality job extended to Windows and Linux.
+
+These tooling changes do not close runtime milestones or add verified games.
+The direct relinker still requires manual config installation.
+
 # Part I: 1.0
 
 ## Milestone 0: Fork foundation
@@ -204,7 +214,7 @@ A lane can start when its blockers are done. Lanes in the same row can run in pa
 
 | Lane | Beans | Blocked by |
 |---|---|---|
-| Config copy at conversion | `portps5-c06p` (startup call landed in PR #71) | none |
+| Config copy through prepare | completed in `portps5-prp1`; remaining config consumers stay in `portps5-c06p` | none |
 | Results compare | `portps5-rrll` | none |
 | Tracker wiring | `portps5-421p` | none |
 | Recorder in submit path | `portps5-tiod` | none |

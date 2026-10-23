@@ -16,10 +16,25 @@ How to convert one decrypted PS5 game dump and run it on Windows. For design det
 | OS | Windows 10/11, 64-bit |
 | GPU | Vulkan 1.3 capable, current driver |
 | Reference tier for the perf bar | 12-core CPU, 12 GB VRAM GPU, 32 GB RAM (PRD §4.4) |
-| To build | MinGW-w64 GCC 15.2 (winlibs, ucrt-posix-seh), CMake 3.20+, Ninja, Vulkan SDK |
+| To build | MinGW-w64 GCC 15.2 (winlibs, ucrt-posix-seh), CMake 3.25+, Ninja, initialized submodules |
+| Python tools | Python 3.11 or newer |
 | Dump layout | A folder containing `eboot.elf` and `sce_sys/param.json` (the title ID is read from it) |
 
 ## 3. Build PortPS5
+
+Check the developer prerequisites first:
+
+```bash
+python tools/doctor.py
+python tools/doctor.py --json
+```
+
+The read-only check reports Windows/x64, the running Python, Git, CMake, Ninja,
+the GCC version/target and submodule initialization. It returns 1 if any check
+fails, with a suggested fix for each blocker. It does not install tools or
+verify GPU capabilities, game compatibility, submodule revision pins, or a
+successful build. Vulkan headers are supplied by the submodules; the Vulkan
+SDK is not required by this check.
 
 ```bash
 git submodule update --init --recursive
@@ -50,7 +65,23 @@ python tools/regress.py prepare \
   --libs build/release/core/libs/libs
 ```
 
-This runs `relinker --windows eboot.elf game.exe`, copies the `.prx` libraries to `<install>\libs`, and links `<install>\app0` to the dump (a junction; the dump is not copied. `mklink /J` does not write-protect it, so a title that opens `/app0/...` for writing can modify the dump. Keep a backup).
+This runs `relinker --windows eboot.elf game.exe`, copies the `.prx` libraries to `<install>\libs`, and links `<install>\app0` to the dump (a junction; the dump is not copied. the junction does not write-protect it, so a title that opens `/app0/...` for writing can modify the dump. Keep a backup).
+
+`prepare` also copies missing files from the repository's `config/` directory
+and preserves all existing config files, including per-game overrides. Use
+`--config "<directory>"` to supply your own defaults; it must contain
+`global.toml`. Add `--to-intel` on Intel hosts to forward the relinker's AMD-only
+instruction lowering option.
+
+Before conversion, the command checks the dump metadata, the relinker, required
+runtime files and destination conflicts. `--libs` is required and must contain
+`libc.prx`, `libkernel.prx`, `libSceAgcDriver.prx`, `libgcc_s_seh-1.dll`,
+`libstdc++-6.dll` and `libwinpthread-1.dll`. This is a minimum sanity check;
+always provide the entire patched build output for the game's other imports.
+Install, dump, libs and config directories must not overlap. Dump and install
+directories must be outside the repository. An existing `app0` must point to
+the same dump; copied trees cannot contain redirected entries. Re-running
+refreshes the executable and libraries while preserving config files.
 
 ### Option B: by hand
 
@@ -64,7 +95,9 @@ Always do the full conversion. Do **not** pass `--skip-sce-module`; it crashes g
 
 ### Config files
 
-The runtime reads config from `<install>\config\`. The relinker does not copy it yet (bean `portps5-c06p`), so copy it yourself:
+The runtime reads config from `<install>\config\`. `prepare` installs missing
+files automatically. With the manual conversion option, copy config yourself
+on the first installation (avoid overwriting your edited files on upgrades):
 
 ```cmd
 xcopy /E config <install>\config\

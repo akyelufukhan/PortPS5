@@ -522,8 +522,12 @@ jobs:
 
 
   python_quality:
-    name: Python quality (uv, ruff, pytest, coverage)
-    runs-on: ubuntu-latest
+    name: Python quality (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-2022]
     needs: changes
     if: needs.changes.outputs.code_changed == 'true'
     steps:

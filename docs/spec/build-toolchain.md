@@ -8,6 +8,18 @@ This spec covers the root and `core/` CMake graph, compiler and linker flags, th
 
 ## Current state
 
+**Fork tooling update (2026-10-23):** PortPS5's root minimum and
+`CMakePresets.json` minimum are now CMake 3.25, matching schema version 6.
+`tools/doctor.py` provides a read-only prerequisite report and `--json` output
+(`schema_version`, `ready`, `checks`; each check has `id`, `status`, `message`,
+`remedy`). Exit 0 means all checks passed; exit 1 means at least one blocker.
+It checks Windows x64, Python >=3.11, Git, CMake >=3.25, Ninja, GCC 15.2.0 with
+an x86_64-w64-mingw32 target, and local submodule initialization markers.
+It does not verify revision pins, build success or GPU/game compatibility.
+Probe failures are bounded and report actionable fixes. Coverage lives in
+`tests/tools/test_doctor.py`. These are fork updates; the upstream snapshots
+in the following historical inventory retain their original versions.
+
 References are to AnyPS5 `main@e06dbff` (the pre-merge baseline) unless marked `main@75a8668` (current AnyPS5 main, includes merged PR #5).
 
 **Root `CMakeLists.txt`:**

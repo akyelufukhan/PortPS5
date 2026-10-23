@@ -1,7 +1,7 @@
 # PortPS5 global configuration (docs/spec/configuration.md).
 #
-# The relinker CLI copies this directory next to the converted executable at
-# conversion time. The runtime reads global.toml first, then
+# tools/regress.py prepare copies missing files from this directory next to
+# the converted executable, preserving existing config. The runtime reads global.toml first, then
 # games/<titleId>.toml, then PORTPS5_DEBUG, key by key. Unknown keys, wrong
 # types and out-of-range values are start-up errors. [workarounds] is only
 # allowed in game files. Every value below is the default; deleting the file
