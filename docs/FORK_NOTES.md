@@ -25,10 +25,17 @@ link does not make the source dump read-only.
 ## Verification and limits
 
 Local Windows validation: 302 tests passed, 3 POSIX-only tests skipped, 2 subtests passed; tools coverage 88.90%. Ruff lint/format passed and CMake 3.25.2 parsed all presets.
-No native C++ build or real-game execution has been performed for this first
+No native C++ build or real-game execution has been performed locally for this
 contribution. The native compiler and submodules are separate prerequisites;
 the doctor command reports them explicitly. Existing compatibility reports
 are inherited upstream reports, not new measurements by this fork.
+
+Hosted verification of commit `3475099` passed in [GitHub Actions](https://github.com/akyelufukhan/PortPS5/actions/runs/40012076506):
+the full MinGW GCC 15.2 C++ build, unit and golden shader tests, policy checks,
+and all 58 Mesa lavapipe driver tests. Python CI passed on Windows (302 passed,
+3 POSIX-only skips; 88.97% coverage) and Linux (305 passed; 89.99% coverage).
+CodeQL, Gitleaks and the Doxygen gate also passed. These synthetic checks do
+not establish real-game compatibility or performance.
 
 Runtime telemetry integration, additional playable games, GPU improvements,
 and binary releases remain separate work. See [ROADMAP.md](ROADMAP.md).

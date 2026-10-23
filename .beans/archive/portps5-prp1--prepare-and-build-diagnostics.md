@@ -32,4 +32,6 @@ Runtime telemetry wiring, GPU changes, additional game compatibility claims, gam
 
 ## Summary of Changes
 
-Delivered preparation config seeding, runtime/path validation, Intel forwarding, read-only doctor, CMake minimum alignment, Windows/Linux Python CI and fork documentation. Local verification: 302 passed, 3 POSIX-only tests skipped on Windows, 2 subtests passed; 88.90% tools coverage; Ruff lint/format passed. Presets parsed with CMake 3.25.2. Native C++ compilation and real-game runs were not performed.
+Delivered preparation config seeding, runtime/path validation, Intel forwarding, read-only doctor, CMake minimum alignment, Windows/Linux Python CI and fork documentation. Local verification: 302 passed, 3 POSIX-only tests skipped on Windows, 2 subtests passed; 88.90% tools coverage; Ruff lint/format passed. Presets parsed with CMake 3.25.2. Native C++ compilation and real-game runs were not performed locally.
+
+Hosted verification of `3475099` passed in [CI](https://github.com/akyelufukhan/PortPS5/actions/runs/40012076506): full MinGW C++ build, unit and golden shader tests, policy checks, 58 lavapipe tests and both Python jobs (Windows 302 passed/3 skipped, Linux 305 passed). CodeQL, Gitleaks and Doxygen also passed. No real-game run was performed.
